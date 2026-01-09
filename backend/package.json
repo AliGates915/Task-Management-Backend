@@ -2,10 +2,10 @@
   "name": "task-management-backend",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/api.js",
+  "main": "api.js",
   "scripts": {
-    "dev": "nodemon src/api.js",
-    "start": "node src/api.js",
+    "dev": "nodemon api.js",
+    "start": "node api.js",
     "lint": "eslint ."
   },
   "dependencies": {
