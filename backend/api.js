@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
 import companyRoutes from './routes/companyRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js'; 
 import userRoutes from './routes/userRoutes.js';
 
 dotenv.config();
@@ -71,6 +72,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/dashboard', dashboardRoutes); // Add this line
 
 // Error handling middleware
 app.use((err, req, res, next) => {
