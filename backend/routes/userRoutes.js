@@ -15,6 +15,14 @@ const router = express.Router();
 
 router.use(protect);
 
+router.post('/', [
+    check('name', 'Name is required').not().isEmpty(),
+    check('email', 'Please include a valid email').isEmail(),
+    check('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
+    check('role', 'Role is required').not().isEmpty()
+], authorize(['admin', 'manager']), createUser);
+
+
 // Profile routes (accessible to all authenticated users)
 router.put('/profile', [
     check('name', 'Name is required').optional().not().isEmpty(),
@@ -29,12 +37,7 @@ router.put('/change-password', [
 // User management routes
 router.get('/', authorize(['admin', 'manager']), getUsers);
 router.get('/:id', authorize(['admin', 'manager']), getUser);
-router.post('/', [
-    check('name', 'Name is required').not().isEmpty(),
-    check('email', 'Please include a valid email').isEmail(),
-    check('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
-    check('role', 'Role is required').not().isEmpty()
-], authorize(['admin', 'manager']), createUser);
+
 
 router.put('/:id', authorize(['admin', 'manager']), updateUser);
 router.delete('/:id', authorize(['admin', 'manager']), deleteUser);

@@ -87,37 +87,31 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    console.log(req.user.role);
-    
+    let { name, email, password, role, company, manager, isActive } = req.body;
 
-    let { name, email, password, role, company, manager, isActive } =
-      req.body;
+    // Only admin or manager allowed
+    if (req.user.role !== "admin" && req.user.role !== "manager") {
+      return res.status(403).json({ message: "Not authorized" });
+    }
 
-    // Check if user already exists
+    // Manager can only create users in their own company
+    if (req.user.role === "manager") {
+      company = req.user.company;
+    }
+
+    // Check user exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    if(req.user.role === 'manager'){
-      company = req.user.company;
+    // Validate company
+    const companyDoc = await Company.findById(company);
+    if (!companyDoc) {
+      return res.status(400).json({ message: "Company not found" });
     }
 
-    // Check permissions
-    if (req.user.role !== "manager" || req.user.role !== "admin") {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to create this user" });
-    }
-
-    // Validate company exists
-    if (company) {
-      const companyExists = await Company.findById(company);
-      if (!companyExists) {
-        return res.status(400).json({ message: "Company not found" });
-      }
-    }
-
+    // Create user
     const user = await User.create({
       name,
       email,
@@ -128,7 +122,11 @@ export const createUser = async (req, res) => {
       isActive,
     });
 
-    // Remove password from response
+    // 🔥 INCREMENT totalUser
+    await Company.findByIdAndUpdate(company, {
+      $inc: { totalUser: 1 },
+    });
+
     user.password = undefined;
 
     res.status(201).json({
@@ -140,35 +138,33 @@ export const createUser = async (req, res) => {
   }
 };
 
+
 export const updateUser = async (req, res) => {
   try {
     const { name, email, role, company, manager, isActive } = req.body;
 
-    let user = await User.findById(req.params.id);
+    const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check permissions
+    const oldCompany = user.company?.toString();
+
+    // ================= PERMISSIONS =================
     if (req.user.role === "staff" && user._id.toString() !== req.user.id) {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to update this user" });
+      return res.status(403).json({ message: "Not authorized" });
     }
 
     if (req.user.role === "manager") {
-      // Managers can only update staff in their company
       if (
         user.company.toString() !== req.user.company ||
         user.role !== "staff"
       ) {
-        return res
-          .status(403)
-          .json({ message: "Not authorized to update this user" });
+        return res.status(403).json({ message: "Not authorized" });
       }
     }
 
-    // Check if email is being changed and if it already exists
+    // ================= EMAIL CHECK =================
     if (email && email !== user.email) {
       const emailExists = await User.findOne({ email });
       if (emailExists) {
@@ -176,7 +172,28 @@ export const updateUser = async (req, res) => {
       }
     }
 
-    user = await User.findByIdAndUpdate(
+    // ================= COMPANY CHANGE LOGIC =================
+    if (company && oldCompany !== company) {
+      const newCompany = await Company.findById(company);
+      if (!newCompany) {
+        return res.status(400).json({ message: "New company not found" });
+      }
+
+      // decrement old company
+      if (oldCompany) {
+        await Company.findByIdAndUpdate(oldCompany, {
+          $inc: { totalUser: -1 },
+        });
+      }
+
+      // increment new company
+      await Company.findByIdAndUpdate(company, {
+        $inc: { totalUser: 1 },
+      });
+    }
+
+    // ================= UPDATE USER =================
+    const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
       {
         name,
@@ -192,12 +209,13 @@ export const updateUser = async (req, res) => {
 
     res.json({
       success: true,
-      user,
+      user: updatedUser,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 export const deleteUser = async (req, res) => {
   try {
@@ -206,35 +224,43 @@ export const deleteUser = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check permissions
+    // Staff cannot delete users
     if (req.user.role === "staff") {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to delete users" });
+      return res.status(403).json({ message: "Not authorized" });
     }
 
+    // Manager restrictions
     if (req.user.role === "manager") {
-      // Managers can only delete staff in their company
       if (
         user.company.toString() !== req.user.company ||
         user.role !== "staff"
       ) {
-        return res
-          .status(403)
-          .json({ message: "Not authorized to delete this user" });
+        return res.status(403).json({
+          message: "Not authorized to delete this user",
+        });
       }
     }
 
-    // Check if user has assigned tasks
-    const assignedTasks = await Task.countDocuments({ assignedTo: user._id });
+    // Check assigned tasks
+    const assignedTasks = await Task.countDocuments({
+      assignedTo: user._id,
+    });
+
     if (assignedTasks > 0) {
       return res.status(400).json({
-        message:
-          "Cannot delete user with assigned tasks. Reassign tasks first.",
+        message: "Cannot delete user with assigned tasks",
       });
     }
 
-    await User.findByIdAndDelete(req.params.id);
+    // Delete user
+    await User.findByIdAndDelete(user._id);
+
+    // 🔥 DECREMENT totalUser
+    if (user.company) {
+      await Company.findByIdAndUpdate(user.company, {
+        $inc: { totalUser: -1 },
+      });
+    }
 
     res.json({
       success: true,
