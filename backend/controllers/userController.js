@@ -62,17 +62,13 @@ export const getUser = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check permission
-    if (req.user.role === "staff" && user._id.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
 
-    if (
-      req.user.role === "manager" &&
-      user.company.toString() !== req.user.company
-    ) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
+    // if (
+    //   req.user.role === "manager" &&
+    //   user.company.toString() !== req.user.company
+    // ) {
+    //   return res.status(403).json({ message: "Not authorized" });
+    // }
 
     res.json({
       success: true,
@@ -287,8 +283,11 @@ export const deleteUser = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { name, email, number } = req.body;
+    let  { name, email, number } = req.body;
 
+    if(!number){
+      number = null
+    }
     // Check if email is being changed and if it already exists
     if (email && email !== req.user.email) {
       const emailExists = await User.findOne({ email });
