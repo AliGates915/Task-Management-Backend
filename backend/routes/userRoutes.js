@@ -18,7 +18,6 @@ router.use(protect);
 router.post('/', [
     check('name', 'Name is required').not().isEmpty(),
     check('email', 'Please include a valid email').isEmail(),
-    check('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
     check('role', 'Role is required').not().isEmpty()
 ], authorize(['admin', 'manager']), createUser);
 

@@ -87,7 +87,7 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    let { name, email, password, role, company, manager, isActive } = req.body;
+    let { name, email, number,password, role, company, manager, isActive } = req.body;
 
     // Only admin or manager allowed
     if (req.user.role !== "admin" && req.user.role !== "manager") {
@@ -115,6 +115,7 @@ export const createUser = async (req, res) => {
     const user = await User.create({
       name,
       email,
+      number,
       password,
       role,
       company,
@@ -141,7 +142,7 @@ export const createUser = async (req, res) => {
 
 export const updateUser = async (req, res) => {
   try {
-    const { name, email, role, company, manager, isActive } = req.body;
+    const { name, email, number, role, company, manager, isActive } = req.body;
 
     const user = await User.findById(req.params.id);
     if (!user) {
@@ -199,6 +200,7 @@ export const updateUser = async (req, res) => {
         name,
         email,
         role,
+        number,
         company,
         manager: manager || null,
         isActive,
@@ -273,7 +275,7 @@ export const deleteUser = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, number } = req.body;
 
     // Check if email is being changed and if it already exists
     if (email && email !== req.user.email) {
@@ -288,6 +290,7 @@ export const updateProfile = async (req, res) => {
       {
         name,
         email,
+        number,
         updatedAt: Date.now(),
       },
       { new: true, runValidators: true }
