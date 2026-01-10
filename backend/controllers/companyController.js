@@ -38,16 +38,101 @@ export const createCompany = async (req, res) => {
 
 export const getCompanies = async (req, res) => {
     try {
-        const companies = await Company.find()
-            .populate('createdBy', 'name email')
+        const { search, isActive, returnType = 'full' } = req.query;
+        let query = {};
+
+        // ==================== ROLE-BASED FILTERING ====================
+        
+        // Admin can see all companies
+        // Manager can only see their own company
+        // Staff shouldn't reach here (route is protected for admin/manager only)
+        
+        if (req.user.role === 'manager') {
+            // Manager can only see their own company
+            query._id = req.user.company;
+        }
+        // Admin: no restrictions (empty query object)
+
+        // ==================== ADDITIONAL FILTERS ====================
+        
+        // Search by company name
+        if (search) {
+            query.name = { $regex: search, $options: 'i' };
+        }
+
+        // Filter by active status
+        if (isActive !== undefined) {
+            query.isActive = isActive === 'true';
+        }
+
+        // ==================== FETCH COMPANIES ====================
+        
+        let companiesQuery = Company.find(query);
+
+        // ==================== POPULATION OPTIONS ====================
+        
+        let populateOptions = [
+            { path: 'createdBy', select: 'name email' }
+        ];
+
+        // Additional population for detailed view
+        if (returnType === 'detailed') {
+            populateOptions.push(
+                { path: 'users', select: 'name email role isActive' },
+                { path: 'tasks', select: 'title status priority' }
+            );
+        }
+
+        // ==================== SORTING ====================
+        
+        companiesQuery = companiesQuery
+            .populate(populateOptions)
             .sort({ createdAt: -1 });
 
+        const companies = await companiesQuery;
+
+        // ==================== FORMAT RESPONSE ====================
+        
+        let formattedCompanies = companies;
+        
+        if (returnType === 'minimal') {
+            formattedCompanies = companies.map(company => ({
+                id: company._id,
+                name: company.name,
+                email: company.email,
+                phone: company.phone,
+                isActive: company.isActive,
+                userCount: company.users?.length || 0,
+                createdBy: company.createdBy?.name || 'Unknown'
+            }));
+        } else if (returnType === 'dropdown') {
+            formattedCompanies = companies.map(company => ({
+                label: company.name,
+                value: company._id,
+                isActive: company.isActive
+            }));
+        }
+
+        // ==================== SEND RESPONSE ====================
+        
         res.json({
             success: true,
-            companies
+            count: companies.length,
+            companies: formattedCompanies,
+            userRole: req.user.role,
+            filters: {
+                search: search || '',
+                isActive: isActive || 'all',
+                returnType
+            }
         });
+
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Error in getCompanies:', error);
+        res.status(500).json({ 
+            success: false,
+            message: error.message 
+        });
     }
 };
 

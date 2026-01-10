@@ -24,6 +24,6 @@ router.get('/', authorize(['admin', 'manager' ]), getCompanies);
 router.get('/:id', authorize(['admin']), getCompany);
 router.put('/:id', authorize(['admin']), updateCompany);
 router.delete('/:id', authorize(['admin']), deleteCompany);
-router.get('/:id/stats', authorize(['admin']), getCompanyStats);
+router.get('/:id/stats', authorize(['admin', 'manager']), getCompanyStats);
 
 export default router;
