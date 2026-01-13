@@ -5,8 +5,6 @@ import { validationResult } from 'express-validator';
 import ExcelJS from 'exceljs';
 import { format, subDays, eachDayOfInterval } from 'date-fns';
 
-// ✅ CREATE TASK (Missing Function)
-
 // ✅ CREATE TASK WITH DETAILED SUBTASKS
 export const createTask = async (req, res) => {
     try {
@@ -16,46 +14,42 @@ export const createTask = async (req, res) => {
         }
 
         const { 
-            title, 
-            description, 
-            assignedTo, 
-            startDate, 
-            endDate, 
+            title,
+            description,
+            assignedTo,
+            startDate,
+            endDate,
             priority,
             company,
-            subTaskDetails // Add this for custom subtasks
+            subTaskDetails // OPTIONAL
         } = req.body;
 
-        // Validate assigned user exists
-        // Validate assigned user exists
+        // Validate assigned user
         const user = await User.findById(assignedTo);
         if (!user) {
             return res.status(404).json({ message: 'Assigned user not found' });
         }
 
-        // If admin, assign the user's company to task
+        // Company resolution
         let taskCompany = company;
         if (req.user.role === 'admin') {
             if (!user.company) {
-                return res.status(400).json({ message: 'Assigned user does not belong to a company' });
+                return res.status(400).json({ message: 'Assigned user has no company' });
             }
             taskCompany = user.company;
         } else if (!taskCompany) {
-            // For non-admin, fallback to req.user.company
             taskCompany = req.user.company;
         }
 
-        
-
-        // Validate company exists
-        if (company) {
-            const companyExists = await Company.findById(company);
+        // Validate company
+        if (taskCompany) {
+            const companyExists = await Company.findById(taskCompany);
             if (!companyExists) {
                 return res.status(404).json({ message: 'Company not found' });
             }
         }
 
-        // Create task
+        // ✅ CREATE TASK (NO SUBTASKS YET)
         const task = await Task.create({
             title,
             description,
@@ -64,52 +58,24 @@ export const createTask = async (req, res) => {
             assignedBy: req.user.id,
             startDate: new Date(startDate),
             endDate: new Date(endDate),
-            priority: priority || 'medium'
+            priority: priority || 'medium',
+            subTasks: [] // 👈 IMPORTANT
         });
 
-        // ✅ Generate subtasks based on user input or default
-        let subTasks = [];
-        
-        if (subTaskDetails && Array.isArray(subTaskDetails) && subTaskDetails.length > 0) {
-            // Use custom subtasks provided by manager
-            subTasks = subTaskDetails.map((subTask, index) => ({
-                date: new Date(subTask.date || startDate),
-                description: subTask.description || `${title} - Day ${index + 1}`,
+        // ✅ ONLY create subtasks if explicitly provided
+        if (Array.isArray(subTaskDetails) && subTaskDetails.length > 0) {
+            const subTasks = subTaskDetails.map((subTask) => ({
+                date: new Date(subTask.date),
+                description: subTask.description,
                 status: 'pending',
                 hoursSpent: 0,
                 remarks: ''
             }));
-        } else {
-            // Generate default daily subtasks - EXCLUDING SUNDAYS
-            const start = new Date(startDate);
-            const end = new Date(endDate);
-            
-            let dayCounter = 1;
-            let currentDate = new Date(start);
-            
-            while (currentDate <= end) {
-                // Check if it's NOT Sunday (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-                if (currentDate.getDay() !== 0) {
-                    subTasks.push({
-                        date: new Date(currentDate),
-                        description: `${title} - Day ${dayCounter}`,
-                        status: 'pending',
-                        hoursSpent: 0,
-                        remarks: ''
-                    });
-                    dayCounter++;
-                }
-                
-                // Move to next day
-                currentDate.setDate(currentDate.getDate() + 1);
-            }
+
+            task.subTasks.push(...subTasks);
+            await task.save();
         }
 
-        // Update task with subtasks
-        task.subTasks = subTasks;
-        await task.save();
-
-        // Populate and return the task
         const populatedTask = await Task.findById(task._id)
             .populate('assignedTo', 'name email')
             .populate('assignedBy', 'name email')
@@ -119,10 +85,12 @@ export const createTask = async (req, res) => {
             success: true,
             task: populatedTask
         });
+
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
+
 
 
 // ✅ UPDATE TASK (Provided earlier)
@@ -153,7 +121,6 @@ export const updateTask = async (req, res) => {
                 taskCompany = user.company;
             }
         }
-
 
         task = await Task.findByIdAndUpdate(
             req.params.id,
@@ -223,7 +190,75 @@ export const addSubTask = async (req, res) => {
     }
 };
 
-// controllers/taskController.js
+export const addSubTaskDay = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    // console.log(" taskId ", taskId);
+    
+    const { date, description, hoursSpent, remarks, status } = req.body;
+
+    if (!date || !description) {
+      return res.status(400).json({ message: 'Date and description are required' });
+    }
+
+    const task = await Task.findById(taskId);
+    // console.log("task ", task);
+    
+    if (!task) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    // Normalize date (strip time)
+    const dayDate = new Date(date);
+    dayDate.setHours(0, 0, 0, 0);
+
+    // Ensure days exists
+    if (!Array.isArray(task.days)) {
+      task.days = [];
+    }
+
+    // Find day
+    let day = task.days.find(d =>
+      new Date(d.date).getTime() === dayDate.getTime()
+    );
+
+    // Create day if not exists
+    if (!day) {
+      task.days.push({
+        date: dayDate,
+        subTasks: []
+      });
+      day = task.days[task.days.length - 1];
+    }
+
+    // 🔥 Safety guard for old DB records
+    if (!Array.isArray(day.subTasks)) {
+      day.subTasks = [];
+    }
+
+    // Add subtask
+    day.subTasks.push({
+      description,
+      hoursSpent: hoursSpent || 0,
+      remarks: remarks || '',
+      status: status || 'pending'
+    });
+
+    await task.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Subtask added successfully',
+      task
+    });
+
+  } catch (error) {
+    console.error('ADD SUBTASK ERROR:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
 
 // ✅ DELETE SUBTASK (NEW FUNCTION)
 export const deleteSubtask = async (req, res) => {
@@ -271,7 +306,7 @@ export const deleteSubtask = async (req, res) => {
     }
 };
 
-// ✅ GET SUBTASK REPORT BY MONTH (NEW FUNCTION)
+// ✅ FIXED GET SUBTASK REPORT - Works with days[] structure
 export const getSubTaskReport = async (req, res) => {
     try {
         const { 
@@ -297,38 +332,63 @@ export const getSubTaskReport = async (req, res) => {
             query.company = req.user.company;
         }
 
-        // Find tasks with subtasks in the specified month
+        // Find tasks
         const tasks = await Task.find(query)
             .populate('assignedTo', 'name email role')
             .populate('company', 'name');
 
-        // Filter subtasks by month
+        // Filter days and subtasks by month
         const monthlyReport = [];
 
         tasks.forEach(task => {
-            const monthlySubTasks = task.subTasks.filter(subTask => {
-                const subTaskDate = new Date(subTask.date);
-                return subTaskDate >= startDate && subTaskDate <= endDate;
+            const days = task.days || [];
+            
+            // Filter days within the month
+            const monthlyDays = days.filter(day => {
+                const dayDate = new Date(day.date);
+                return dayDate >= startDate && dayDate <= endDate;
             });
 
-            if (monthlySubTasks.length > 0) {
-                monthlyReport.push({
-                    taskId: task._id,
-                    taskTitle: task.title,
-                    assignedTo: task.assignedTo?.name,
-                    company: task.company?.name,
-                    subTasks: monthlySubTasks.map(subTask => ({
-                        date: subTask.date,
-                        description: subTask.description,
-                        status: subTask.status,
-                        hoursSpent: subTask.hoursSpent,
-                        remarks: subTask.remarks,
-                        completedAt: subTask.completedAt
-                    })),
-                    totalHours: monthlySubTasks.reduce((sum, st) => sum + (st.hoursSpent || 0), 0),
-                    completedSubtasks: monthlySubTasks.filter(st => st.status === 'completed').length,
-                    totalSubtasks: monthlySubTasks.length
+            if (monthlyDays.length > 0) {
+                // Collect all subtasks from filtered days
+                const allSubTasks = [];
+                let totalHours = 0;
+                let completedCount = 0;
+                let totalCount = 0;
+
+                monthlyDays.forEach(day => {
+                    const subTasks = day.subTasks || [];
+                    subTasks.forEach(subTask => {
+                        totalCount++;
+                        totalHours += subTask.hoursSpent || 0;
+                        if (subTask.status === 'completed') {
+                            completedCount++;
+                        }
+
+                        allSubTasks.push({
+                            date: day.date,
+                            description: subTask.description,
+                            status: subTask.status,
+                            hoursSpent: subTask.hoursSpent || 0,
+                            remarks: subTask.remarks || '',
+                            completedAt: subTask.completedAt,
+                            createdAt: subTask.createdAt
+                        });
+                    });
                 });
+
+                if (allSubTasks.length > 0) {
+                    monthlyReport.push({
+                        taskId: task._id,
+                        taskTitle: task.title,
+                        assignedTo: task.assignedTo?.name,
+                        company: task.company?.name,
+                        subTasks: allSubTasks,
+                        totalHours,
+                        completedSubtasks: completedCount,
+                        totalSubtasks: totalCount
+                    });
+                }
             }
         });
 
@@ -338,11 +398,13 @@ export const getSubTaskReport = async (req, res) => {
             totalSubtasks: monthlyReport.reduce((sum, task) => sum + task.totalSubtasks, 0),
             completedSubtasks: monthlyReport.reduce((sum, task) => sum + task.completedSubtasks, 0),
             totalHours: monthlyReport.reduce((sum, task) => sum + task.totalHours, 0),
-            completionRate: monthlyReport.reduce((sum, task) => sum + task.completedSubtasks, 0) > 0 
-                ? Math.round((monthlyReport.reduce((sum, task) => sum + task.completedSubtasks, 0) / 
-                            monthlyReport.reduce((sum, task) => sum + task.totalSubtasks, 0)) * 100)
-                : 0
+            completionRate: 0
         };
+
+        // Calculate completion rate safely
+        if (summary.totalSubtasks > 0) {
+            summary.completionRate = Math.round((summary.completedSubtasks / summary.totalSubtasks) * 100);
+        }
 
         res.json({
             success: true,
@@ -358,6 +420,7 @@ export const getSubTaskReport = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('Subtask report error:', error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -616,6 +679,8 @@ export const getDashboardStats = async (req, res) => {
 };
 
 // ✅ GET REPORT (Provided earlier)
+// ✅ FIXED GET REPORT - Works with days[] structure
+// ✅ FIXED GET REPORT - Works with days[] structure AND includes complete tree
 export const getReport = async (req, res) => {
     try {
         const { 
@@ -650,24 +715,76 @@ export const getReport = async (req, res) => {
             .populate('company', 'name')
             .sort({ createdAt: -1 });
 
-        // Generate report data
-        const reportData = tasks.map(task => ({
-            taskId: task._id,
-            title: task.title,
-            assignedTo: task.assignedTo?.name,
-            assignedToEmail: task.assignedTo?.email,
-            assignedToRole: task.assignedTo?.role,
-            company: task.company?.name,
-            startDate: task.startDate,
-            endDate: task.endDate,
-            status: task.status,
-            priority: task.priority,
-            progress: task.progress,
-            totalHours: task.subTasks.reduce((sum, sub) => sum + (sub.hoursSpent || 0), 0),
-            completedSubtasks: task.subTasks.filter(st => st.status === 'completed').length,
-            totalSubtasks: task.subTasks.length,
-            createdAt: task.createdAt
-        }));
+        // Helper function to calculate totals from days array
+        const calculateTaskStats = (task) => {
+            const days = task.days || [];
+            let totalHours = 0;
+            let completedSubtasks = 0;
+            let totalSubtasks = 0;
+
+            days.forEach(day => {
+                const subTasks = day.subTasks || [];
+                totalSubtasks += subTasks.length;
+                subTasks.forEach(subTask => {
+                    totalHours += subTask.hoursSpent || 0;
+                    if (subTask.status === 'completed') {
+                        completedSubtasks++;
+                    }
+                });
+            });
+
+            return { totalHours, completedSubtasks, totalSubtasks };
+        };
+
+        // Generate report data WITH COMPLETE TREE STRUCTURE
+        const reportData = tasks.map(task => {
+            const stats = calculateTaskStats(task);
+            
+            return {
+                _id: task._id,
+                taskId: task._id,
+                title: task.title,
+                description: task.description,
+                assignedTo: {
+                    _id: task.assignedTo?._id,
+                    name: task.assignedTo?.name,
+                    email: task.assignedTo?.email,
+                    role: task.assignedTo?.role
+                },
+                assignedBy: {
+                    _id: task.assignedBy?._id,
+                    name: task.assignedBy?.name,
+                    email: task.assignedBy?.email
+                },
+                company: {
+                    _id: task.company?._id,
+                    name: task.company?.name
+                },
+                startDate: task.startDate,
+                endDate: task.endDate,
+                status: task.status,
+                priority: task.priority,
+                progress: task.progress,
+                totalHours: stats.totalHours,
+                completedSubtasks: stats.completedSubtasks,
+                totalSubtasks: stats.totalSubtasks,
+                createdAt: task.createdAt,
+                // 🔥 INCLUDE COMPLETE TREE STRUCTURE
+                days: (task.days || []).map(day => ({
+                    date: day.date,
+                    subTasks: (day.subTasks || []).map(subTask => ({
+                        _id: subTask._id,
+                        description: subTask.description,
+                        hoursSpent: subTask.hoursSpent || 0,
+                        remarks: subTask.remarks || '',
+                        status: subTask.status,
+                        completedAt: subTask.completedAt,
+                        createdAt: subTask.createdAt,
+                        updatedAt: subTask.updatedAt
+                    }))
+                }))
+            };
+        });
 
         // Calculate summary statistics
         const totalTasks = tasks.length;
@@ -681,29 +798,28 @@ export const getReport = async (req, res) => {
         // Group by user for detailed analysis
         const userReports = {};
         reportData.forEach(task => {
-            const userId = task.assignedTo;
-            if (!userReports[userId]) {
-                userReports[userId] = {
-                    userId,
-                    name: task.assignedTo,
-                    email: task.assignedToEmail,
+            const userName = task.assignedTo?.name;
+            if (!userReports[userName]) {
+                userReports[userName] = {
+                    name: userName,
+                    email: task.assignedTo?.email,
                     totalTasks: 0,
                     completedTasks: 0,
                     totalHours: 0,
                     avgProgress: 0
                 };
             }
-            userReports[userId].totalTasks++;
-            userReports[userId].totalHours += task.totalHours;
+            userReports[userName].totalTasks++;
+            userReports[userName].totalHours += task.totalHours;
             if (task.status === 'completed') {
-                userReports[userId].completedTasks++;
+                userReports[userName].completedTasks++;
             }
         });
 
         // Calculate average progress per user
-        Object.keys(userReports).forEach(userId => {
-            const userTasks = reportData.filter(task => task.assignedTo === userId);
-            userReports[userId].avgProgress = userTasks.length > 0 ?
+        Object.keys(userReports).forEach(userName => {
+            const userTasks = reportData.filter(task => task.assignedTo?.name === userName);
+            userReports[userName].avgProgress = userTasks.length > 0 ?
                 Math.round(userTasks.reduce((sum, task) => sum + task.progress, 0) / userTasks.length) : 0;
         });
 
@@ -725,7 +841,7 @@ export const getReport = async (req, res) => {
                     avgProgress,
                     completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
                 },
-                detailed: reportData,
+                detailed: reportData, // 🔥 NOW INCLUDES COMPLETE TREE
                 userReports: Object.values(userReports),
                 chartData: [
                     { name: 'Completed', value: completedTasks, color: '#4CAF50' },
@@ -735,38 +851,12 @@ export const getReport = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('Report error:', error);
         res.status(500).json({ message: error.message });
     }
 };
 
-
-
-// ✅ DELETE TASK (Provided earlier)
-export const deleteTask = async (req, res) => {
-    try {
-        const task = await Task.findById(req.params.id);
-        if (!task) {
-            return res.status(404).json({ message: 'Task not found' });
-        }
-
-        // Check permission
-        if (req.user.role === 'staff') {
-            return res.status(403).json({ message: 'Not authorized to delete tasks' });
-        }
-
-
-        await Task.findByIdAndDelete(req.params.id);
-
-        res.json({
-            success: true,
-            message: 'Task deleted successfully'
-        });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-
+// ✅ FIXED EXPORT TO EXCEL - Works with days[] structure
 export const exportToExcel = async (req, res) => {
     try {
         const { 
@@ -798,13 +888,34 @@ export const exportToExcel = async (req, res) => {
             .populate('assignedBy', 'name email')
             .populate('company', 'name');
 
+        // Helper function to calculate totals from days array
+        const calculateTaskStats = (task) => {
+            const days = task.days || [];
+            let totalHours = 0;
+            let completedSubtasks = 0;
+            let totalSubtasks = 0;
+
+            days.forEach(day => {
+                const subTasks = day.subTasks || [];
+                totalSubtasks += subTasks.length;
+                subTasks.forEach(subTask => {
+                    totalHours += subTask.hoursSpent || 0;
+                    if (subTask.status === 'completed') {
+                        completedSubtasks++;
+                    }
+                });
+            });
+
+            return { totalHours, completedSubtasks, totalSubtasks };
+        };
+
         // Create workbook and worksheet
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Tasks Report');
 
         // Define columns
         worksheet.columns = [
-            { header: 'SR #', key: 'srNo', width: 25 },
+            { header: 'SR #', key: 'srNo', width: 10 },
             { header: 'Title', key: 'title', width: 30 },
             { header: 'Description', key: 'description', width: 40 },
             { header: 'Assigned To', key: 'assignedTo', width: 20 },
@@ -824,8 +935,10 @@ export const exportToExcel = async (req, res) => {
 
         // Add data rows
         tasks.forEach((task, index) => {
+            const stats = calculateTaskStats(task);
+            
             worksheet.addRow({
-                srNo: index +1 ,
+                srNo: index + 1,
                 title: task.title,
                 description: task.description || '',
                 assignedTo: task.assignedTo?.name || 'Unassigned',
@@ -837,9 +950,9 @@ export const exportToExcel = async (req, res) => {
                 status: task.status,
                 priority: task.priority,
                 progress: `${task.progress}%`,
-                totalHours: task.subTasks.reduce((sum, sub) => sum + (sub.hoursSpent || 0), 0),
-                completedSubtasks: task.subTasks.filter(st => st.status === 'completed').length,
-                totalSubtasks: task.subTasks.length,
+                totalHours: stats.totalHours,
+                completedSubtasks: stats.completedSubtasks,
+                totalSubtasks: stats.totalSubtasks,
                 createdAt: task.createdAt.toISOString().split('T')[0]
             });
         });
@@ -852,6 +965,7 @@ export const exportToExcel = async (req, res) => {
                 pattern: 'solid',
                 fgColor: { argb: 'FFE0E0E0' }
             };
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
 
         // Set response headers for file download
@@ -872,6 +986,31 @@ export const exportToExcel = async (req, res) => {
 
     } catch (error) {
         console.error('Export error:', error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// ✅ DELETE TASK (Provided earlier)
+export const deleteTask = async (req, res) => {
+    try {
+        const task = await Task.findById(req.params.id);
+        if (!task) {
+            return res.status(404).json({ message: 'Task not found' });
+        }
+
+        // Check permission
+        if (req.user.role === 'staff') {
+            return res.status(403).json({ message: 'Not authorized to delete tasks' });
+        }
+
+
+        await Task.findByIdAndDelete(req.params.id);
+
+        res.json({
+            success: true,
+            message: 'Task deleted successfully'
+        });
+    } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };

@@ -12,6 +12,7 @@ import {
     exportToExcel, 
     deleteSubtask,
     addSubTask, 
+    addSubTaskDay,
     getSubTaskReport
 } from '../controllers/taskController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
@@ -43,7 +44,9 @@ router.put('/:id', updateTask);
 router.delete('/:id', deleteTask);
 
 // Subtask routes
-router.post('/:taskId/subtasks', protect, addSubTask);
+
+router.post('/:taskId/subtaskDays', protect, addSubTaskDay);
+// router.post('/:taskId/subtasks', protect, addSubTask);
 router.put('/:taskId/subtasks/:subTaskId', updateSubTask);
 router.delete('/:taskId/subtasks/:subTaskId', protect, deleteSubtask);
 
