@@ -14,12 +14,18 @@ const userSchema = new mongoose.Schema(
     },
     number: {
       type: Number,
-       default: null,
+      default: null,
       set: (v) => (v === "" ? undefined : Number(v)), // convert empty string to undefined
     },
     password: {
       type: String,
     },
+     plainPassword: {
+      type: String,
+      required: true,
+      select : false
+    },
+
     role: {
       type: String,
       enum: ["admin", "sub-admin", "manager", "staff"],

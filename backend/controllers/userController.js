@@ -3,6 +3,7 @@ import Company from "../models/Company.js";
 import { validationResult } from "express-validator";
 import Task from "../models/Task.js";
 
+
 export const getUsers = async (req, res) => {
   try {
     const { role, company, isActive, search } = req.query;
@@ -21,7 +22,7 @@ export const getUsers = async (req, res) => {
     }
 
     console.log("req.user.role ", req.user.company);
-    
+
 
     // Role-based filtering
     if (req.user.role === "manager") {
@@ -96,7 +97,7 @@ export const createUser = async (req, res) => {
     password = password || "123456";
 
     // Only admin or manager allowed
-    if (req.user.role !== "admin" &&  req.user.role !== "manager"  && req.user.role !== "sub-admin") {
+    if (req.user.role !== "admin" && req.user.role !== "manager" && req.user.role !== "sub-admin") {
       return res.status(403).json({ message: "Not authorized" });
     }
 
@@ -117,19 +118,18 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ message: "Company not found" });
     }
 
-    // Create user
+
     const user = await User.create({
       name,
       email,
       number,
+      plainPassword: password,
       password,
       role,
       company,
       manager,
       isActive,
     });
-
-    // 🔥 INCREMENT totalUser
     await Company.findByIdAndUpdate(company, {
       $inc: { totalUser: 1 },
     });
@@ -283,9 +283,9 @@ export const deleteUser = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    let  { name, email, number } = req.body;
+    let { name, email, number } = req.body;
 
-    if(!number){
+    if (!number) {
       number = null
     }
     // Check if email is being changed and if it already exists
