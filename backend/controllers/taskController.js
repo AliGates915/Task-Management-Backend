@@ -702,7 +702,8 @@ export const getReport = async (req, res) => {
             month = new Date().getMonth() + 1,
             year = new Date().getFullYear(),
             userId,
-            companyId
+            companyId,
+            role
         } = req.query;
 
         const startDate = new Date(year, month - 1, 1);
@@ -717,7 +718,23 @@ export const getReport = async (req, res) => {
         if (userId) query.assignedTo = userId;
         if (companyId) query.company = companyId;
 
-        // Apply role-based filtering
+        // Apply role filter (if role is provided and no specific user selected)
+        if (role && !userId) {
+            const userQuery = { role };
+
+            // If manager is requesting, scope to their company
+            if (req.user.role === 'manager') {
+                userQuery.company = req.user.company;
+            }
+            // If staff is requesting, they probably shouldn't be filtering freely, 
+            // but the role check below handles their restriction to self.
+
+            const users = await User.find(userQuery).select('_id');
+            const userIds = users.map(u => u._id);
+            query.assignedTo = { $in: userIds };
+        }
+
+        // Apply role-based filtering (Constraint)
         if (req.user.role === 'staff') {
             query.assignedTo = req.user.id;
         } else if (req.user.role === 'manager') {
