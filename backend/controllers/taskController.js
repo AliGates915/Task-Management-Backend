@@ -3,9 +3,34 @@ import User from '../models/User.js';
 import Company from '../models/Company.js';
 import { validationResult } from 'express-validator';
 import ExcelJS from 'exceljs';
-import { format, subDays, eachDayOfInterval } from 'date-fns';
+import { format, subDays, eachDayOfInterval, isSameDay } from 'date-fns';
 
-// ✅ CREATE TASK WITH DETAILED SUBTASKS
+// Helper function to update task progress and status
+// Only marks 'completed' if subtasks are 100% AND the days cover the full duration
+const updateTaskProgressAndStatus = (task) => {
+    const allSubTasks = task.days.flatMap(day => day.subTasks);
+    // Be careful with empty subtasks
+    if (allSubTasks.length === 0) {
+        task.progress = 0;
+        task.status = 'pending';
+        return;
+    }
+
+    const completedCount = allSubTasks.filter(st => st.status === 'completed').length;
+    task.progress = Math.round((completedCount / allSubTasks.length) * 100);
+
+    // Check if we have subtasks for the final day (or if start=end)
+    const hasFinalDay = task.days.some(d => isSameDay(new Date(d.date), new Date(task.endDate)));
+
+    if (task.progress === 100 && hasFinalDay) {
+        task.status = 'completed';
+    } else if (task.progress > 0) {
+        task.status = 'in-progress';
+    } else {
+        task.status = 'pending';
+    }
+};
+
 export const createTask = async (req, res) => {
     try {
         const errors = validationResult(req);
@@ -241,6 +266,9 @@ export const addSubTaskDay = async (req, res) => {
             status: status || 'in-progress'
         });
 
+        // Update progress and status centrally
+        updateTaskProgressAndStatus(task);
+
         await task.save();
 
         res.status(201).json({
@@ -279,10 +307,7 @@ export const deleteSubtask = async (req, res) => {
         if (!removed) return res.status(404).json({ message: 'Subtask not found' });
 
         // Recalculate task progress
-        const allSubTasks = task.days.flatMap(day => day.subTasks);
-        const completedCount = allSubTasks.filter(st => st.status === 'completed').length;
-        task.progress = allSubTasks.length ? Math.round((completedCount / allSubTasks.length) * 100) : 0;
-        task.status = task.progress === 100 ? 'completed' : task.progress > 0 ? 'in-progress' : 'pending';
+        updateTaskProgressAndStatus(task);
 
         await task.save();
 
@@ -563,14 +588,7 @@ export const updateSubTask = async (req, res) => {
         }
 
         // Recalculate task progress
-        const allSubTasks = task.days.flatMap(day => day.subTasks);
-        const completedCount = allSubTasks.filter(st => st.status === 'completed').length;
-        task.progress = Math.round((completedCount / allSubTasks.length) * 100);
-
-        // Update task status
-        if (task.progress === 100) task.status = 'completed';
-        else if (task.progress > 0) task.status = 'in-progress';
-        else task.status = 'pending';
+        updateTaskProgressAndStatus(task);
 
         await task.save();
 
